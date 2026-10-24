@@ -1,0 +1,64 @@
+# Publishes to PyPI when a GitHub release is published, using Trusted Publishing
+# (OIDC), so no API token is stored in this repository.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install "build>=1.2,<2" "twine>=6,<7"
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+
+      - name: Check the release tag matches the package version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          test -f "dist/honeyfile-${version}.tar.gz" || {
+            echo "::error::Tag $TAG does not match the version in src/honeyfile/__init__.py"
+            ls dist
+            exit 1
+          }
+
+      - name: Smoke-test the wheel
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/honeyfile --version
+          /tmp/smoke/bin/honeyfile plant /tmp/demo --profile dev
+          /tmp/smoke/bin/honeyfile status /tmp/demo
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/honeyfile/
+    permissions:
+      id-token: write # Trusted Publishing and attestations
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
