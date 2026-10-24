@@ -40,12 +40,14 @@ class Alert:
 def _check_decoy(entry: Entry, path: Path) -> Alert | None:
     try:
         stat = path.stat()
+        changed = stat.st_size != entry.size or digest(path) != entry.sha256
     except FileNotFoundError:
         return Alert("deleted", entry.name, "decoy file is gone")
     except OSError as error:
+        # Replaced by a directory, or read permission pulled — a change worth flagging.
         return Alert("modified", entry.name, f"cannot read decoy: {error}")
 
-    if stat.st_size != entry.size or digest(path) != entry.sha256:
+    if changed:
         return Alert(
             "modified", entry.name, f"contents changed ({entry.size} → {stat.st_size} bytes)"
         )

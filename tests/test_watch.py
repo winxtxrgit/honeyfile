@@ -67,3 +67,21 @@ def test_alerts_are_sorted_worst_first(tmp_path):
     (tmp_path / "note.txt").write_text("hi")  # severity 50
     severities = [a.severity for a in scan(tmp_path, read(tmp_path))]
     assert severities == sorted(severities, reverse=True)
+
+
+def test_unreadable_decoy_is_modified_not_a_crash(tmp_path, monkeypatch):
+    # A decoy replaced by a directory (same size) makes digest() raise mid-scan.
+    plant(tmp_path, "office")
+    import honeyfile.watch as w
+
+    real = w.digest
+
+    def boom(path):
+        if path.name == "passwords.txt":
+            raise IsADirectoryError("is a directory")
+        return real(path)
+
+    monkeypatch.setattr(w, "digest", boom)
+    alerts = scan(tmp_path, read(tmp_path))
+    hit = [a for a in alerts if a.path == "passwords.txt"]
+    assert hit and hit[0].event == "modified" and "cannot read" in hit[0].detail
