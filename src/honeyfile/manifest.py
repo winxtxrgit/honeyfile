@@ -56,8 +56,17 @@ def _checksum(created: str, profile: str, entries: list[Entry]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def write(directory: Path, manifest: Manifest) -> Path:
-    path = directory / MANIFEST_NAME
+def manifest_path(directory: Path, path: Path | None = None) -> Path:
+    """Where the baseline lives: *path* if given, else ``.honeyfile.json`` in *directory*.
+
+    Passing *path* keeps the baseline out of the watched directory, so an intruder
+    who lands among the decoys cannot read it to learn which files are bait.
+    """
+    return path if path is not None else directory / MANIFEST_NAME
+
+
+def write(directory: Path, manifest: Manifest, path: Path | None = None) -> Path:
+    mpath = manifest_path(directory, path)
     data = {
         "format": _FORMAT,
         "created": manifest.created,
@@ -65,24 +74,25 @@ def write(directory: Path, manifest: Manifest) -> Path:
         "entries": [asdict(e) for e in manifest.entries],
         "checksum": _checksum(manifest.created, manifest.profile, manifest.entries),
     }
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    return path
+    mpath.parent.mkdir(parents=True, exist_ok=True)
+    mpath.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return mpath
 
 
 class ManifestError(Exception):
     """The manifest is missing, unreadable, or fails its own integrity check."""
 
 
-def read(directory: Path) -> Manifest:
-    path = directory / MANIFEST_NAME
+def read(directory: Path, path: Path | None = None) -> Manifest:
+    mpath = manifest_path(directory, path)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(mpath.read_text(encoding="utf-8"))
     except FileNotFoundError:
         raise ManifestError(
-            f"no {MANIFEST_NAME} in {directory}; run 'honeyfile plant' first"
+            f"no {mpath.name} in {mpath.parent}; run 'honeyfile plant' first"
         ) from None
     except (OSError, json.JSONDecodeError) as error:
-        raise ManifestError(f"{path} is unreadable: {error}") from None
+        raise ManifestError(f"{mpath} is unreadable: {error}") from None
 
     try:
         entries = [
@@ -91,8 +101,8 @@ def read(directory: Path) -> Manifest:
         ]
         created, profile, stored = raw["created"], raw["profile"], raw["checksum"]
     except (KeyError, TypeError, ValueError) as error:
-        raise ManifestError(f"{path} is not a valid manifest: {error}") from None
+        raise ManifestError(f"{mpath} is not a valid manifest: {error}") from None
 
     if _checksum(created, profile, entries) != stored:
-        raise ManifestError(f"{path} has been modified since it was written (checksum mismatch)")
+        raise ManifestError(f"{mpath} has been modified since it was written (checksum mismatch)")
     return Manifest(created, profile, entries)

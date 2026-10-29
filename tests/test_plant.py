@@ -58,3 +58,23 @@ def test_every_profile_template_formats():
     for profile in PROFILES:
         for decoy in decoys_for(profile):
             decoy.body.format(token="X")
+
+
+def test_manifest_can_live_outside_the_watched_directory(tmp_path):
+    share = tmp_path / "share"
+    external = tmp_path / "baseline" / "share.json"
+    manifest = plant(share, "office", manifest_path=external)
+    assert external.exists()
+    # Nothing in the share reveals which files are bait.
+    assert not (share / MANIFEST_NAME).exists()
+    assert read(share, external).entries == manifest.entries
+
+
+def test_decoys_are_backdated(tmp_path):
+    import time
+
+    # Freshly planted decoys should look older than "just now", so a directory
+    # of them doesn't betray itself by all sharing one creation time.
+    now = time.time()
+    for entry in plant(tmp_path, "office").entries:
+        assert entry.mtime < now - 7 * 86400  # at least a week old

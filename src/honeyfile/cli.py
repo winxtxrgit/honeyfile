@@ -10,9 +10,21 @@ from pathlib import Path
 from . import __version__
 from .alerts import Sinks, format_terminal
 from .decoys import PROFILES
-from .manifest import ManifestError, read
+from .manifest import ManifestError, manifest_path, read
 from .plant import PlantError, plant
 from .watch import monitor, scan
+
+
+def _add_manifest_arg(p: argparse.ArgumentParser, *, writing: bool) -> None:
+    verb = "store" if writing else "read"
+    p.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=f"{verb} the baseline at PATH instead of .honeyfile.json inside the "
+        "directory, so an intruder among the decoys cannot find it",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="which set of decoys to plant (default: %(default)s)",
     )
     p.add_argument("--force", action="store_true", help="overwrite existing files of the same name")
+    _add_manifest_arg(p, writing=True)
 
     w = sub.add_parser("watch", help="monitor planted decoys and alert on any change")
     w.add_argument("directory", type=Path)
@@ -57,10 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="CMD",
         help="run CMD on each alert (shell-style quoting; event passed as HONEYFILE_* env)",
     )
+    _add_manifest_arg(w, writing=False)
 
     s = sub.add_parser("status", help="show the current state of the decoys and exit")
     s.add_argument("directory", type=Path)
     s.add_argument("--no-new-files", action="store_true")
+    _add_manifest_arg(s, writing=False)
 
     return parser
 
@@ -74,20 +89,24 @@ def _positive(text: str) -> float:
 
 def _cmd_plant(args) -> int:
     try:
-        manifest = plant(args.directory, args.profile, args.force)
+        manifest = plant(args.directory, args.profile, args.force, manifest_path=args.manifest)
     except (PlantError, ValueError, OSError) as error:
         print(f"honeyfile: {error}", file=sys.stderr)
         return 2
     print(f"Planted {len(manifest.entries)} {args.profile} decoys in {args.directory}:")
     for entry in manifest.entries:
         print(f"  {entry.name}")
-    print(f"\nNow watch them:\n  honeyfile watch {args.directory}")
+    print(f"Baseline: {manifest_path(args.directory, args.manifest)}")
+    watch_cmd = f"honeyfile watch {args.directory}"
+    if args.manifest:
+        watch_cmd += f" --manifest {args.manifest}"
+    print(f"\nNow watch them:\n  {watch_cmd}")
     return 0
 
 
 def _cmd_status(args) -> int:
     try:
-        manifest = read(args.directory)
+        manifest = read(args.directory, args.manifest)
     except ManifestError as error:
         print(f"honeyfile: {error}", file=sys.stderr)
         return 2
@@ -112,7 +131,7 @@ def _cmd_watch(args) -> int:
     )
     if args.once:
         try:
-            manifest = read(args.directory)
+            manifest = read(args.directory, args.manifest)
         except ManifestError as error:
             print(f"honeyfile: {error}", file=sys.stderr)
             return 2
@@ -123,7 +142,12 @@ def _cmd_watch(args) -> int:
 
     print(f"Watching {args.directory} every {args.interval:g}s. Ctrl+C to stop.", file=sys.stderr)
     try:
-        for event in monitor(args.directory, args.interval, detect_new=not args.no_new_files):
+        for event in monitor(
+            args.directory,
+            args.interval,
+            detect_new=not args.no_new_files,
+            manifest_path=args.manifest,
+        ):
             if isinstance(event, ManifestError):
                 print(f"honeyfile: baseline problem: {event}", file=sys.stderr, flush=True)
             else:

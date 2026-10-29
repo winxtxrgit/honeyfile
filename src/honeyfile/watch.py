@@ -48,9 +48,11 @@ def _check_decoy(entry: Entry, path: Path) -> Alert | None:
         return Alert("modified", entry.name, f"cannot read decoy: {error}")
 
     if changed:
-        return Alert(
-            "modified", entry.name, f"contents changed ({entry.size} → {stat.st_size} bytes)"
-        )
+        if stat.st_size != entry.size:
+            detail = f"contents changed ({entry.size} → {stat.st_size} bytes)"
+        else:
+            detail = f"contents changed (same {entry.size} bytes, hash differs)"
+        return Alert("modified", entry.name, detail)
     if stat.st_mtime != entry.mtime:
         return Alert("touched", entry.name, "timestamp changed but contents are intact")
     return None
@@ -79,7 +81,11 @@ def scan(directory: Path, manifest: Manifest, *, detect_new: bool = True) -> lis
 
 
 def monitor(
-    directory: Path, interval: float, *, detect_new: bool = True
+    directory: Path,
+    interval: float,
+    *,
+    detect_new: bool = True,
+    manifest_path: Path | None = None,
 ) -> Iterator[Alert | ManifestError]:
     """Scan *directory* every *interval* seconds, yielding each alert once.
 
@@ -91,7 +97,7 @@ def monitor(
     manifest_broken = False
     while True:
         try:
-            manifest = read(directory)
+            manifest = read(directory, manifest_path)
             manifest_broken = False
         except ManifestError as error:
             if not manifest_broken:

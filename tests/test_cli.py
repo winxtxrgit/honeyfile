@@ -63,6 +63,21 @@ def test_status_without_manifest_errors(tmp_path, capsys):
     assert "honeyfile:" in capsys.readouterr().err
 
 
+def test_external_manifest_round_trips(tmp_path, capsys):
+    share = tmp_path / "share"
+    ext = tmp_path / "base.json"
+    assert main(["plant", str(share), "--manifest", str(ext)]) == 0
+    capsys.readouterr()
+    assert ext.exists()
+    assert not (share / ".honeyfile.json").exists()
+    # Without --manifest the baseline can't be found...
+    assert main(["status", str(share)]) == 2
+    capsys.readouterr()
+    # ...but with it, the decoys read clean.
+    assert main(["status", str(share), "--manifest", str(ext)]) == 0
+    assert "intact" in capsys.readouterr().out
+
+
 def test_bad_interval_rejected(tmp_path, capsys):
     main(["plant", str(tmp_path)])
     try:

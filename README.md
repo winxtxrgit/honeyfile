@@ -7,7 +7,7 @@
 
 **Plant decoy files and get alerted the moment ransomware or an intruder touches them.**
 
-honeyfile drops tempting-looking bait — `Payroll_2026_Q4.csv`, `passwords.txt`, `.env`, `backup.sql` — into a directory and records exactly what each one looks like. Then it watches. The instant something encrypts, deletes or even opens a decoy, you get an alert with the file and what happened. It's a tripwire: a normal user never touches these files, so any change is a signal.
+honeyfile drops tempting-looking bait — `Payroll_2026_Q4.csv`, `passwords.txt`, `.env`, `backup.sql` — into a directory and records exactly what each one looks like. Then it watches. The instant something encrypts, modifies or deletes a decoy, you get an alert with the file and what happened. It's a tripwire: a normal user never touches these files, so any change is a signal.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/winxtxrgit/honeyfile/main/docs/terminal.png" alt="honeyfile planting three office decoys, reporting them intact, then detecting two encrypted files, one deleted file and a dropped ransom note" width="820">
@@ -44,6 +44,11 @@ honeyfile watch /srv/share --json alerts.jsonl
 honeyfile watch /srv/share --webhook https://hooks.example.com/honeyfile
 honeyfile watch /srv/share --exec "/usr/local/bin/isolate-host.sh"
 honeyfile watch /srv/share --once             # for cron; exits 1 if anything changed
+
+# Keep the baseline out of the watched directory (recommended for shares an
+# intruder can browse). Use the same --manifest path for plant, status and watch:
+honeyfile plant  /srv/share --manifest /var/lib/honeyfile/share.json
+honeyfile status /srv/share --manifest /var/lib/honeyfile/share.json
 ```
 
 **Profiles** decide which decoys get planted: `office` (payroll, passwords, a confidential doc), `dev` (`.env`, `id_rsa`, deploy keys), `db` (SQL dumps, a customer export). Every decoy contains only inert placeholder data — the one AWS-shaped key is AWS's own documented example — plus a unique `HONEYFILE-CANARY-…` token you can also search for in logs, email or outbound traffic.
@@ -56,9 +61,9 @@ honeyfile watch /srv/share --once             # for cron; exits 1 if anything ch
 | `deleted` | high | A decoy is gone — wiped or moved |
 | `manifest-error` | high | The baseline itself was altered or deleted — someone covering their tracks |
 | `new-file` | medium | A file that wasn't planted appeared next to the decoys — a ransom note, a dropped tool |
-| `touched` | low | A decoy's timestamp changed but its contents are intact — it was opened or restored |
+| `touched` | low | A decoy's timestamp changed but its contents are intact — re-saved or restored |
 
-Each decoy is fingerprinted by **sha256 + size**, so a change that keeps the same byte count is still caught. The baseline lives in `.honeyfile.json`, which carries a checksum of its own contents: editing it to hide a change fails the check, and deleting it is reported too.
+Each decoy is fingerprinted by **sha256 + size**, so a change that keeps the same byte count is still caught. The baseline lives in `.honeyfile.json`, which carries a checksum of its own contents: editing it to hide a change fails the check, and deleting it is reported too. Pass `--manifest PATH` to keep that baseline **outside** the watched directory, so an intruder among the decoys can't read it to learn which files are bait. Planted decoys also get **varied, backdated timestamps** so a directory of them doesn't betray itself by sharing one creation time.
 
 ## Alerting
 
