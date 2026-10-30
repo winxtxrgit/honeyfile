@@ -1,6 +1,7 @@
 # honeyfile
 
 [![CI](https://github.com/winxtxrgit/honeyfile/actions/workflows/ci.yml/badge.svg)](https://github.com/winxtxrgit/honeyfile/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/honeyfile?color=0e75b6)](https://pypi.org/project/honeyfile/)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-0e75b6)
 ![No dependencies](https://img.shields.io/badge/dependencies-none-2ea44f)
 [![MIT License](https://img.shields.io/badge/license-MIT-0e75b6)](https://github.com/winxtxrgit/honeyfile/blob/main/LICENSE)
@@ -22,7 +23,7 @@ This is a detection tool, the opposite of malware. It never encrypts anything; i
 ## Try it in 30 seconds
 
 ```bash
-pipx install git+https://github.com/winxtxrgit/honeyfile
+pipx install honeyfile        # or: pip install honeyfile
 
 mkdir demo
 honeyfile plant demo --profile office
