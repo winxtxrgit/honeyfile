@@ -16,11 +16,14 @@ from pathlib import Path
 from .manifest import MANIFEST_NAME, Entry, Manifest, ManifestError, digest, read
 
 # Higher is worse. Encryption and deletion are the ransomware signal; a changed
-# timestamp or a new sibling file is weaker on its own.
+# timestamp or a new sibling file is weaker on its own. "opened" only fires from
+# the inotify backend: nothing legitimate ever reads a decoy, so an open is a
+# strong early signal — someone is browsing the bait before touching it.
 SEVERITY = {
+    "manifest-error": 95,
     "modified": 90,
     "deleted": 90,
-    "manifest-error": 95,
+    "opened": 70,
     "new-file": 50,
     "touched": 40,
 }

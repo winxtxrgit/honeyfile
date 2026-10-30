@@ -7,11 +7,13 @@ import os
 import random
 import secrets
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .decoys import decoys_for
-from .manifest import Entry, Manifest, digest, write
+from .manifest import Entry, Manifest, digest, read, write
+from .manifest import manifest_path as manifest_path_of
 
 
 class PlantError(Exception):
@@ -73,3 +75,35 @@ def plant(
     manifest = Manifest(datetime.now(timezone.utc).isoformat(timespec="seconds"), profile, entries)
     write(directory, manifest, manifest_path)
     return manifest
+
+
+@dataclass(frozen=True)
+class Removed:
+    """What an ``unplant`` took away, so the caller can report it honestly."""
+
+    deleted: list[str]  # decoy names removed from disk
+    missing: list[str]  # decoys the baseline listed but were already gone
+    manifest: Path  # the baseline file that was removed
+
+
+def unplant(directory: Path, manifest_path: Path | None = None) -> Removed:
+    """Remove the decoys recorded in the baseline, then the baseline itself.
+
+    Only files named in the manifest are deleted, so anything you created in the
+    directory yourself is left alone. A decoy already gone is reported, not an
+    error. Raises :class:`~honeyfile.manifest.ManifestError` if no baseline is
+    found — there is then nothing to safely remove.
+    """
+    manifest = read(directory, manifest_path)
+    deleted: list[str] = []
+    missing: list[str] = []
+    for entry in manifest.entries:
+        path = directory / entry.name
+        try:
+            path.unlink()
+            deleted.append(entry.name)
+        except FileNotFoundError:
+            missing.append(entry.name)
+    mpath = manifest_path_of(directory, manifest_path)
+    mpath.unlink()
+    return Removed(deleted, missing, mpath)
