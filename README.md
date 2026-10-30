@@ -45,11 +45,15 @@ honeyfile watch /srv/share --webhook https://hooks.example.com/honeyfile
 honeyfile watch /srv/share --exec "/usr/local/bin/isolate-host.sh"
 honeyfile watch /srv/share --once             # for cron; exits 1 if anything changed
 
+honeyfile unplant /srv/share                  # remove the decoys and the baseline
+
 # Keep the baseline out of the watched directory (recommended for shares an
 # intruder can browse). Use the same --manifest path for plant, status and watch:
 honeyfile plant  /srv/share --manifest /var/lib/honeyfile/share.json
 honeyfile status /srv/share --manifest /var/lib/honeyfile/share.json
 ```
+
+On Linux, `watch` uses **inotify** by default: it reacts the instant a decoy is touched and — unlike polling — catches a decoy merely being *opened or read*, before anything is changed. Elsewhere it falls back to polling. Force either with `--backend poll` or `--backend inotify`.
 
 **Profiles** decide which decoys get planted: `office` (payroll, passwords, a confidential doc), `dev` (`.env`, `id_rsa`, deploy keys), `db` (SQL dumps, a customer export). Every decoy contains only inert placeholder data — the one AWS-shaped key is AWS's own documented example — plus a unique `HONEYFILE-CANARY-…` token you can also search for in logs, email or outbound traffic.
 
@@ -60,6 +64,7 @@ honeyfile status /srv/share --manifest /var/lib/honeyfile/share.json
 | `modified` | high | A decoy's contents changed — ransomware encrypting, or someone editing it |
 | `deleted` | high | A decoy is gone — wiped or moved |
 | `manifest-error` | high | The baseline itself was altered or deleted — someone covering their tracks |
+| `opened` | high | A decoy was opened or read — someone browsing the bait (Linux inotify backend only) |
 | `new-file` | medium | A file that wasn't planted appeared next to the decoys — a ransom note, a dropped tool |
 | `touched` | low | A decoy's timestamp changed but its contents are intact — re-saved or restored |
 
@@ -84,8 +89,8 @@ Put decoys where a legitimate user has no reason to go, so every alert is real. 
 
 ## Limits, honestly
 
-- It detects **tampering**, not reads. A plain open that changes nothing surfaces only as `touched`, and only if the filesystem updates access times (many don't, with `relatime`/`noatime`). For true read-auditing use the OS (Linux `auditd`, Windows file-access auditing); honeyfile is the lightweight, portable layer.
-- `watch` polls every few seconds, so detection is near-real-time, not instant. Fast ransomware may encrypt several files between scans — you'll still catch it, within one interval.
+- **Read detection is Linux-only.** On Linux the inotify backend reports a decoy being opened or read (`opened`), the earliest possible signal. On macOS and Windows `watch` polls, which can only compare snapshots: a plain read changes nothing it can see, so there it detects **tampering**, not reads. For OS-level read-auditing everywhere, use `auditd` (Linux) or Windows file-access auditing; honeyfile is the lightweight, portable layer.
+- **Polling is near-real-time, not instant.** Where inotify isn't used, `watch` scans every few seconds, so fast ransomware may encrypt several files between scans — you'll still catch it, within one interval. The inotify backend reacts immediately.
 - Decoys protect themselves and signal an attack; they don't stop it. The response is yours, via `--exec` or your tooling.
 
 ## Development

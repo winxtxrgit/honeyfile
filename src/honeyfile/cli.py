@@ -7,11 +7,11 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__
+from . import __version__, inotify
 from .alerts import Sinks, format_terminal
 from .decoys import PROFILES
 from .manifest import ManifestError, manifest_path, read
-from .plant import PlantError, plant
+from .plant import PlantError, plant, unplant
 from .watch import monitor, scan
 
 
@@ -58,6 +58,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     w.add_argument("--once", action="store_true", help="scan once and exit instead of looping")
     w.add_argument(
+        "--backend",
+        choices=("auto", "poll", "inotify"),
+        default="auto",
+        help="auto (default) uses inotify on Linux for instant, read-level detection "
+        "and falls back to polling elsewhere; poll forces the portable scanner",
+    )
+    w.add_argument(
         "--no-new-files",
         action="store_true",
         help="do not alert on unplanted files appearing in the directory",
@@ -76,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("directory", type=Path)
     s.add_argument("--no-new-files", action="store_true")
     _add_manifest_arg(s, writing=False)
+
+    u = sub.add_parser("unplant", help="remove the planted decoys and their baseline")
+    u.add_argument("directory", type=Path, help="directory the decoys were planted in")
+    _add_manifest_arg(u, writing=False)
 
     return parser
 
@@ -140,14 +151,37 @@ def _cmd_watch(args) -> int:
             sinks.emit(alert)
         return 1 if alerts else 0
 
-    print(f"Watching {args.directory} every {args.interval:g}s. Ctrl+C to stop.", file=sys.stderr)
-    try:
-        for event in monitor(
+    use_inotify = args.backend == "inotify" or (args.backend == "auto" and inotify.available())
+    if args.backend == "inotify" and not inotify.available():
+        print(
+            "honeyfile: the inotify backend needs Linux; use --backend poll here",
+            file=sys.stderr,
+        )
+        return 2
+
+    if use_inotify:
+        print(
+            f"Watching {args.directory} with inotify (real-time). Ctrl+C to stop.",
+            file=sys.stderr,
+        )
+        events = inotify.monitor(
+            args.directory,
+            detect_new=not args.no_new_files,
+            manifest_path=args.manifest,
+        )
+    else:
+        print(
+            f"Watching {args.directory} every {args.interval:g}s. Ctrl+C to stop.", file=sys.stderr
+        )
+        events = monitor(
             args.directory,
             args.interval,
             detect_new=not args.no_new_files,
             manifest_path=args.manifest,
-        ):
+        )
+
+    try:
+        for event in events:
             if isinstance(event, ManifestError):
                 print(f"honeyfile: baseline problem: {event}", file=sys.stderr, flush=True)
             else:
@@ -157,9 +191,30 @@ def _cmd_watch(args) -> int:
     return 0
 
 
+def _cmd_unplant(args) -> int:
+    try:
+        removed = unplant(args.directory, args.manifest)
+    except (ManifestError, OSError) as error:
+        print(f"honeyfile: {error}", file=sys.stderr)
+        return 2
+    print(f"Removed {len(removed.deleted)} decoy(s) from {args.directory}:")
+    for name in removed.deleted:
+        print(f"  {name}")
+    for name in removed.missing:
+        print(f"  {name} (already gone)")
+    print(f"Removed baseline: {removed.manifest}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return {"plant": _cmd_plant, "watch": _cmd_watch, "status": _cmd_status}[args.command](args)
+    handlers = {
+        "plant": _cmd_plant,
+        "watch": _cmd_watch,
+        "status": _cmd_status,
+        "unplant": _cmd_unplant,
+    }
+    return handlers[args.command](args)
 
 
 if __name__ == "__main__":
