@@ -1,5 +1,9 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+# Cap hatchling below 1.28: 1.28+ emits Metadata-Version 2.5, which no released
+# twine yet understands, so `twine check --strict` in release.yml rejects the
+# build. 1.27 emits 2.4 (same PEP 639 License-Expression) and passes. Lift the
+# ceiling once twine supports metadata 2.5.
+requires = ["hatchling>=1.27,<1.28"]
 build-backend = "hatchling.build"
 
 [project]
