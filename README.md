@@ -54,7 +54,15 @@ honeyfile plant  /srv/share --manifest /var/lib/honeyfile/share.json
 honeyfile status /srv/share --manifest /var/lib/honeyfile/share.json
 ```
 
-On Linux, `watch` uses **inotify** by default: it reacts the instant a decoy is touched and — unlike polling — catches a decoy merely being *opened or read*, before anything is changed. Elsewhere it falls back to polling. Force either with `--backend poll` or `--backend inotify`.
+`watch` reacts the instant a decoy changes wherever the OS allows it:
+
+| OS | Backend | Reports |
+| :--- | :--- | :--- |
+| Linux | **inotify** | every change, and a decoy merely being *opened or read*, before anything is changed |
+| macOS, BSD | **kqueue** | every change, deletion, rename and replacement, and new files, the instant they happen |
+| Windows | polling | every change, within one `--interval` (5 s by default) |
+
+The default `--backend auto` picks the first that works here. Force one with `--backend inotify`, `kqueue` or `poll`. Every backend needs only the Python standard library.
 
 **Profiles** decide which decoys get planted: `office` (payroll, passwords, a confidential doc), `dev` (`.env`, `id_rsa`, deploy keys), `db` (SQL dumps, a customer export). Every decoy contains only inert placeholder data — the one AWS-shaped key is AWS's own documented example — plus a unique `HONEYFILE-CANARY-…` token you can also search for in logs, email or outbound traffic.
 
@@ -65,7 +73,7 @@ On Linux, `watch` uses **inotify** by default: it reacts the instant a decoy is 
 | `modified` | high | A decoy's contents changed — ransomware encrypting, or someone editing it |
 | `deleted` | high | A decoy is gone — wiped or moved |
 | `manifest-error` | high | The baseline itself was altered or deleted — someone covering their tracks |
-| `opened` | high | A decoy was opened or read — someone browsing the bait (Linux inotify backend only) |
+| `opened` | high | A decoy was opened or read — someone browsing the bait (Linux only) |
 | `new-file` | medium | A file that wasn't planted appeared next to the decoys — a ransom note, a dropped tool |
 | `touched` | low | A decoy's timestamp changed but its contents are intact — re-saved or restored |
 
@@ -90,9 +98,14 @@ Put decoys where a legitimate user has no reason to go, so every alert is real. 
 
 ## Limits, honestly
 
-- **Read detection is Linux-only.** On Linux the inotify backend reports a decoy being opened or read (`opened`), the earliest possible signal. On macOS and Windows `watch` polls, which can only compare snapshots: a plain read changes nothing it can see, so there it detects **tampering**, not reads. For OS-level read-auditing everywhere, use `auditd` (Linux) or Windows file-access auditing; honeyfile is the lightweight, portable layer.
-- **Polling is near-real-time, not instant.** Where inotify isn't used, `watch` scans every few seconds, so fast ransomware may encrypt several files between scans — you'll still catch it, within one interval. The inotify backend reacts immediately.
+- **Read detection is Linux-only.** On Linux the inotify backend reports a decoy being opened or read (`opened`), the earliest possible signal. kqueue on macOS has no open event, and polling can only compare snapshots, so on macOS and Windows honeyfile detects **tampering**, not reads. For OS-level read-auditing there, use Endpoint Security (macOS) or Windows file-access auditing; honeyfile is the lightweight, portable layer.
+- **Windows polls.** It scans every few seconds, so fast ransomware may encrypt several files between scans — you'll still catch it, within one interval. Linux and macOS react immediately.
+- **Real-time backends report what happens while they run.** Use `honeyfile status` (or `watch --once`) after a restart to compare against the baseline.
 - Decoys protect themselves and signal an attack; they don't stop it. The response is yours, via `--exec` or your tooling.
+
+## What's next
+
+See [ROADMAP.md](https://github.com/winxtxrgit/honeyfile/blob/main/ROADMAP.md): a Windows backend, catching up on changes made while nothing was watching, and working together with [loghunt](https://github.com/winxtxrgit/loghunt).
 
 ## Development
 
