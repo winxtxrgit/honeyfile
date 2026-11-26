@@ -7,7 +7,7 @@ import shlex
 import sys
 from pathlib import Path
 
-from . import __version__, inotify
+from . import __version__, inotify, kqueue
 from .alerts import Sinks, format_terminal
 from .decoys import PROFILES
 from .manifest import ManifestError, manifest_path, read
@@ -59,10 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--once", action="store_true", help="scan once and exit instead of looping")
     w.add_argument(
         "--backend",
-        choices=("auto", "poll", "inotify"),
+        choices=("auto", "poll", "inotify", "kqueue"),
         default="auto",
-        help="auto (default) uses inotify on Linux for instant, read-level detection "
-        "and falls back to polling elsewhere; poll forces the portable scanner",
+        help="auto (default) reacts instantly where it can: inotify on Linux (reads "
+        "included), kqueue on macOS and BSD, polling elsewhere; poll forces the portable "
+        "scanner",
     )
     w.add_argument(
         "--no-new-files",
@@ -151,20 +152,24 @@ def _cmd_watch(args) -> int:
             sinks.emit(alert)
         return 1 if alerts else 0
 
-    use_inotify = args.backend == "inotify" or (args.backend == "auto" and inotify.available())
-    if args.backend == "inotify" and not inotify.available():
+    backends = {"inotify": (inotify, "Linux"), "kqueue": (kqueue, "macOS or BSD")}
+    backend = args.backend
+    if backend == "auto":
+        backend = next((name for name, (mod, _) in backends.items() if mod.available()), "poll")
+    elif backend in backends and not backends[backend][0].available():
         print(
-            "honeyfile: the inotify backend needs Linux; use --backend poll here",
+            f"honeyfile: the {backend} backend needs {backends[backend][1]}; "
+            "use --backend poll here",
             file=sys.stderr,
         )
         return 2
 
-    if use_inotify:
+    if backend in backends:
         print(
-            f"Watching {args.directory} with inotify (real-time). Ctrl+C to stop.",
+            f"Watching {args.directory} with {backend} (real-time). Ctrl+C to stop.",
             file=sys.stderr,
         )
-        events = inotify.monitor(
+        events = backends[backend][0].monitor(
             args.directory,
             detect_new=not args.no_new_files,
             manifest_path=args.manifest,

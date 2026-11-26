@@ -85,3 +85,60 @@ def test_bad_interval_rejected(tmp_path, capsys):
     except SystemExit as exit:
         assert exit.code == 2
     assert "greater than 0" in capsys.readouterr().err
+
+
+def _fake_backend(name, available, calls):
+    """A backend module stand-in that records which one ran and yields one alert."""
+    from honeyfile.watch import Alert
+
+    def monitor(directory, **kwargs):
+        calls.append(name)
+        yield Alert("modified", "passwords.txt", "contents changed")
+
+    return {"available": lambda: available, "monitor": monitor}
+
+
+@pytest.mark.parametrize(
+    ("inotify_ok", "kqueue_ok", "expected"),
+    [(True, False, "inotify"), (False, True, "kqueue"), (True, True, "inotify")],
+)
+def test_auto_backend_picks_the_real_time_one(
+    tmp_path, capsys, monkeypatch, inotify_ok, kqueue_ok, expected
+):
+    from honeyfile import cli
+
+    main(["plant", str(tmp_path)])
+    calls = []
+    for name, ok in (("inotify", inotify_ok), ("kqueue", kqueue_ok)):
+        for attr, value in _fake_backend(name, ok, calls).items():
+            monkeypatch.setattr(getattr(cli, name), attr, value)
+    assert main(["watch", str(tmp_path)]) == 0
+    assert calls == [expected]
+    err = capsys.readouterr().err
+    assert f"with {expected} (real-time)" in err
+    assert "passwords.txt" in err
+
+
+def test_auto_backend_falls_back_to_polling(tmp_path, capsys, monkeypatch):
+    from honeyfile import cli
+
+    main(["plant", str(tmp_path)])
+    for name in ("inotify", "kqueue"):
+        monkeypatch.setattr(getattr(cli, name), "available", lambda: False)
+
+    def one_poll(directory, interval, **kwargs):
+        yield from ()
+
+    monkeypatch.setattr(cli, "monitor", one_poll)
+    assert main(["watch", str(tmp_path)]) == 0
+    assert "every 5s" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("backend", "needs"), [("inotify", "Linux"), ("kqueue", "macOS or BSD")])
+def test_unavailable_backend_is_an_error(tmp_path, capsys, monkeypatch, backend, needs):
+    from honeyfile import cli
+
+    main(["plant", str(tmp_path)])
+    monkeypatch.setattr(getattr(cli, backend), "available", lambda: False)
+    assert main(["watch", str(tmp_path), "--backend", backend]) == 2
+    assert f"needs {needs}" in capsys.readouterr().err
